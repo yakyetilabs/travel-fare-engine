@@ -1,20 +1,24 @@
 {
   "name": "travel_fare_engine",
   "description": "Two-step travel fare quote pipeline: Validation/Pricing → JSON Formatting",
-  "supportedInterfaces": [
-    {
-      "url": "http://localhost:8081/",
-      "protocolBinding": "jsonrpc",
-      "protocolVersion": "1.0"
-    }
-  ],
   "version": "1.0.0",
+  "protocolVersion": "0.3.0",
+  "url": "http://localhost:8081/",
+  "preferredTransport": "JSONRPC",
+  "additionalInterfaces": [
+    { "url": "http://localhost:8081/", "transport": "JSONRPC" }
+  ],
   "defaultInputModes": ["text/plain", "application/json"],
   "defaultOutputModes": ["application/json"],
+  "capabilities": {
+    "streaming": true
+  },
   "skills": [
     {
+      "id": "compute_fare",
       "name": "compute_fare",
       "description": "Compute a travel fare quote from a validated FareQuoteRequest.",
+      "tags": ["travel", "pricing", "fare"],
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -70,8 +74,5 @@
         ]
       }
     }
-  ],
-  "capabilities": {
-    "streaming": true
-  }
+  ]
 }

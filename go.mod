@@ -12,6 +12,7 @@ require (
 	cloud.google.com/go v0.123.0 // indirect
 	cloud.google.com/go/auth v0.20.0 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
+	github.com/a2aproject/a2a-go v0.3.15 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
@@ -37,6 +38,7 @@ require (
 	golang.org/x/sys v0.44.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
 	google.golang.org/api v0.279.0 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20260427160629-7cedc36a6bc4 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260511170946-3700d4141b60 // indirect
 	google.golang.org/grpc v1.81.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect

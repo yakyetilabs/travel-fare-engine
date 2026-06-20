@@ -121,7 +121,7 @@ If you get a JSON-RPC method error, verify you are POSTing `message/send` to `/`
 curl http://localhost:8081/.well-known/agent-card.json
 ```
 
-This should return a JSON card with the interface URL set to `http://localhost:8081/` (or your `HOST_URL` if set). The server rewrites the `supportedInterfaces[].url` field of the static `agent-card.json` at startup — see `resolvePublicURL` / `renderAgentCard` in `cmd/server/main.go` — so the static file's URL is only a default. The skills section should list `compute_fare`.
+This should return a JSON card with the top-level `url` set to `http://localhost:8081/` (or your `HOST_URL` if set). The server rewrites the A2A `url` (and `additionalInterfaces[].url`) of the static `agent-card.json` at startup — see `resolvePublicURL` / `renderAgentCard` in `cmd/server/main.go` — so the static file's URL is only a default. The skills section should list `compute_fare`.
 
 ---
 

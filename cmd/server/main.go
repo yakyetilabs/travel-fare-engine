@@ -7,9 +7,11 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/a2aproject/a2a-go/v2/a2acompat/a2av0"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
 	"google.golang.org/genai"
 
@@ -83,6 +85,22 @@ func fareQuoteOutputSchema() *genai.Schema {
 	}
 }
 
+// useVertexAI reports whether the Vertex AI backend was requested via env.
+func useVertexAI() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("GOOGLE_GENAI_USE_VERTEXAI")))
+	return v == "true" || v == "1"
+}
+
+// firstNonEmpty returns the first non-empty string of its arguments.
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 // resolvePublicURL determines the externally reachable base URL advertised in the
 // agent card. Cloud Run does not inject the service URL automatically, so it is
 // passed explicitly via HOST_URL; locally it falls back to http://localhost:<port>.
@@ -105,7 +123,10 @@ func renderAgentCard(path, publicURL string) ([]byte, error) {
 	if err := json.Unmarshal(data, &card); err != nil {
 		return nil, err
 	}
-	if ifaces, ok := card["supportedInterfaces"].([]any); ok {
+	// The A2A AgentCard schema uses the top-level "url" (the primary endpoint) plus
+	// "additionalInterfaces"; rewrite both to the runtime public URL.
+	card["url"] = publicURL
+	if ifaces, ok := card["additionalInterfaces"].([]any); ok {
 		for _, raw := range ifaces {
 			if iface, ok := raw.(map[string]any); ok {
 				iface["url"] = publicURL
@@ -118,14 +139,34 @@ func renderAgentCard(path, publicURL string) ([]byte, error) {
 func main() {
 	ctx := context.Background()
 
-	apiKey := os.Getenv("GEMINI_API_KEY")
-	if apiKey == "" {
-		log.Fatal("CRITICAL: GEMINI_API_KEY environment variable is required")
+	// Two model backends, selected by environment:
+	//   - Vertex AI (production): GOOGLE_GENAI_USE_VERTEXAI=true, with
+	//     GOOGLE_CLOUD_PROJECT + GOOGLE_CLOUD_LOCATION. Auth is Application
+	//     Default Credentials (the Cloud Run service account) — no API key.
+	//   - AI Studio (local dev): GEMINI_API_KEY.
+	// The genai SDK also reads these env vars itself; we branch explicitly so
+	// misconfiguration fails fast with a clear message instead of a cryptic 401.
+	clientConfig := &genai.ClientConfig{}
+	if useVertexAI() {
+		project := os.Getenv("GOOGLE_CLOUD_PROJECT")
+		location := firstNonEmpty(os.Getenv("GOOGLE_CLOUD_LOCATION"), os.Getenv("GOOGLE_CLOUD_REGION"))
+		if project == "" || location == "" {
+			log.Fatal("CRITICAL: Vertex AI mode requires GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION")
+		}
+		clientConfig.Backend = genai.BackendVertexAI
+		clientConfig.Project = project
+		clientConfig.Location = location
+		log.Printf("Using Vertex AI backend (project=%s, location=%s)", project, location)
+	} else {
+		apiKey := os.Getenv("GEMINI_API_KEY")
+		if apiKey == "" {
+			log.Fatal("CRITICAL: GEMINI_API_KEY is required (or set GOOGLE_GENAI_USE_VERTEXAI=true for Vertex AI)")
+		}
+		clientConfig.APIKey = apiKey
+		log.Print("Using AI Studio (Gemini API key) backend")
 	}
 
-	model, err := gemini.NewModel(ctx, "gemini-2.5-flash", &genai.ClientConfig{
-		APIKey: apiKey,
-	})
+	model, err := gemini.NewModel(ctx, "gemini-2.5-flash", clientConfig)
 	if err != nil {
 		log.Fatalf("Failed to initialize Gemini model: %v", err)
 	}
@@ -214,7 +255,12 @@ func main() {
 		},
 	})
 	requestHandler := a2asrv.NewHandler(executor)
-	mux.Handle(agentPath, a2asrv.NewJSONRPCHandler(requestHandler))
+	// Serve the STANDARD A2A JSON-RPC method names (message/send, message/stream, …)
+	// via the a2av0 compat handler. The v2-native a2asrv.NewJSONRPCHandler dispatches
+	// on gRPC-style names (SendMessage, …), which standard A2A clients — like the
+	// orchestrator's a2a-python RemoteA2aAgent — do not send, yielding -32601
+	// METHOD_NOT_FOUND.
+	mux.Handle(agentPath, a2av0.NewJSONRPCHandler(requestHandler))
 
 	server := &http.Server{Addr: ":" + port, Handler: mux}
 

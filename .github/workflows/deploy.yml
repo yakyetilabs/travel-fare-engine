@@ -1,0 +1,85 @@
+name: ci-cd
+
+# Test on every PR; test + deploy on push to main. Auth to GCP is keyless via
+# Workload Identity Federation (no service-account keys). Required repo variables:
+#   GCP_PROJECT, GCP_REGION, GCP_WIF_PROVIDER, GCP_DEPLOY_SA  (see scripts/setup-wif.sh)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write   # required for WIF OIDC
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - name: Vet
+        run: go vet ./...
+      - name: Test (unit + tripwire + eval)
+        run: go test ./...
+
+  deploy:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        name: Authenticate to GCP (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy engine (private, Vertex)
+        run: |
+          gcloud run deploy travel-fare-engine \
+            --source . \
+            --project "${{ vars.GCP_PROJECT }}" \
+            --region "${{ vars.GCP_REGION }}" \
+            --service-account "travel-fare-engine-sa@${{ vars.GCP_PROJECT }}.iam.gserviceaccount.com" \
+            --no-allow-unauthenticated \
+            --min-instances=0 --max-instances=2 --cpu=1 --memory=512Mi --timeout=120 \
+            --set-env-vars "GOOGLE_GENAI_USE_VERTEXAI=TRUE,GOOGLE_CLOUD_PROJECT=${{ vars.GCP_PROJECT }},GOOGLE_CLOUD_LOCATION=${{ vars.GCP_REGION }}"
+
+      - id: svc
+        name: Resolve service URL and set HOST_URL
+        run: |
+          URL=$(gcloud run services describe travel-fare-engine \
+            --project "${{ vars.GCP_PROJECT }}" --region "${{ vars.GCP_REGION }}" \
+            --format='value(status.url)')
+          echo "url=${URL}" >> "$GITHUB_OUTPUT"
+          gcloud run services update travel-fare-engine \
+            --project "${{ vars.GCP_PROJECT }}" --region "${{ vars.GCP_REGION }}" \
+            --update-env-vars "HOST_URL=${URL}/"
+
+      - id: idtoken
+        name: Mint ID token for the smoke test
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+          token_format: id_token
+          id_token_audience: ${{ steps.svc.outputs.url }}
+          id_token_include_email: true
+
+      - name: Smoke test (agent card advertises real URL)
+        run: |
+          URL="${{ steps.svc.outputs.url }}"
+          BODY=$(curl -sS -H "Authorization: Bearer ${{ steps.idtoken.outputs.id_token }}" \
+            "${URL}/.well-known/agent-card.json")
+          echo "$BODY" | jq -e '.url | test("^https://")' >/dev/null \
+            || { echo "agent card URL is not a real https URL: $BODY"; exit 1; }
+          echo "Smoke test passed: $(echo "$BODY" | jq -r '.url')"

@@ -27,6 +27,17 @@ node_modules/
 .vscode/
 *.log
 
+# ---- Secrets — never commit ----
+.env
+.env.*
+!.env.example
+*-key.json
+*-credentials.json
+service-account*.json
+
+# ---- Local build artifact ----
+travel-fare-engine
+
 # ---- OS Specific ----
 .DS_Store
 
