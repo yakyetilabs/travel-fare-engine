@@ -8,6 +8,16 @@ it and returns a structured `FareQuote`.
 The headline idea: **a deterministic core wrapped in an LLM-as-transport adapter.**
 Every dollar of arithmetic lives in pure, audited Go — the model never does math.
 
+> **📦 Part of a two-repo system.** This is the pricing engine. The orchestrator
+> that calls it lives in a separate repo — to run the whole thing, clone both:
+> - 🧭 **Orchestrator (start here):** [yakyetilabs/travel-agent](https://github.com/yakyetilabs/travel-agent)
+> - ⚙️ **This repo (pricing engine):** [yakyetilabs/travel-fare-engine](https://github.com/yakyetilabs/travel-fare-engine)
+>
+> System-level guides (in the orchestrator repo):
+> [Architecture](https://github.com/yakyetilabs/travel-agent/blob/main/docs/ARCHITECTURE.md) ·
+> [Deploy your own](https://github.com/yakyetilabs/travel-agent/blob/main/docs/DEPLOY.md) ·
+> [Lessons learned](https://github.com/yakyetilabs/travel-agent/blob/main/docs/LESSONS.md)
+
 ---
 
 ## Why this project exists
