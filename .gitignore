@@ -1,0 +1,35 @@
+# ---- Go Specific Ignores ----
+# Compiled binaries and architecture-specific files
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Main project binaries (Add your custom binary names here if needed)
+bin/
+dist/
+
+# ---- Tooling and Dependency Ignores ----
+# Go modules vendoring directory (if you use go mod vendor)
+vendor/
+
+# ---- AI Agent & Workspace Ignores ----
+# Keep Claude from reading massive dependency or cache directories
+.venv/
+venv/
+node_modules/
+.pnpm-store/
+.zed/
+.idea/
+.vscode/
+*.log
+
+# ---- OS Specific ----
+.DS_Store
+
+CLAUDE.md
+.claude/
+claude.json

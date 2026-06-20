@@ -1,0 +1,77 @@
+{
+  "name": "travel_fare_engine",
+  "description": "Two-step travel fare quote pipeline: Validation/Pricing → JSON Formatting",
+  "supportedInterfaces": [
+    {
+      "url": "http://localhost:8081/",
+      "protocolBinding": "jsonrpc",
+      "protocolVersion": "1.0"
+    }
+  ],
+  "version": "1.0.0",
+  "defaultInputModes": ["text/plain", "application/json"],
+  "defaultOutputModes": ["application/json"],
+  "skills": [
+    {
+      "name": "compute_fare",
+      "description": "Compute a travel fare quote from a validated FareQuoteRequest.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "base_distance_miles": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 10000
+          },
+          "advance_purchase_days": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 365
+          },
+          "passengers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "count": { "type": "integer", "minimum": 1, "maximum": 9 },
+                "type": {
+                  "type": "string",
+                  "enum": ["adult", "child", "infant"]
+                }
+              },
+              "required": ["count", "type"]
+            }
+          },
+          "cabin_class": {
+            "type": "string",
+            "enum": ["economy", "premium_economy", "business", "first"]
+          },
+          "booking_class": {
+            "type": "string",
+            "enum": ["Y", "B", "M", "H", "Q", "G", "K"]
+          },
+          "route_type": {
+            "type": "string",
+            "enum": ["domestic", "international"]
+          },
+          "season_code": {
+            "type": "string",
+            "enum": ["low", "shoulder", "peak"]
+          }
+        },
+        "required": [
+          "base_distance_miles",
+          "advance_purchase_days",
+          "passengers",
+          "cabin_class",
+          "booking_class",
+          "route_type",
+          "season_code"
+        ]
+      }
+    }
+  ],
+  "capabilities": {
+    "streaming": true
+  }
+}

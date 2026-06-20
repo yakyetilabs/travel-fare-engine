@@ -1,0 +1,90 @@
+[
+  {
+    "name": "single_adult_economy_Y_domestic_low_1000mi_30ap",
+    "request": {
+      "base_distance_miles": 1000,
+      "advance_purchase_days": 30,
+      "passengers": [{ "count": 1, "type": "adult" }],
+      "cabin_class": "economy",
+      "booking_class": "Y",
+      "route_type": "domestic",
+      "season_code": "low"
+    },
+    "expected": {
+      "base_fare": 92.0,
+      "total_fare": 109.0,
+      "fare_basis_prefix": "EYLD",
+      "tax_count": 3,
+      "refundable": true,
+      "changeable": true,
+      "advance_purchase_min": 0
+    }
+  },
+  {
+    "name": "booking_class_G_30ap_domestic_economy",
+    "request": {
+      "base_distance_miles": 1000,
+      "advance_purchase_days": 30,
+      "passengers": [{ "count": 1, "type": "adult" }],
+      "cabin_class": "economy",
+      "booking_class": "G",
+      "route_type": "domestic",
+      "season_code": "low"
+    },
+    "expected": {
+      "base_fare": 46.0,
+      "total_fare": 59.55,
+      "fare_basis_prefix": "EGLD",
+      "tax_count": 3,
+      "refundable": false,
+      "changeable": false,
+      "advance_purchase_min": 21
+    }
+  },
+  {
+    "name": "mixed_pax_2ad_1ch_1inf_economy_Y_intl_low_1000mi_60ap",
+    "request": {
+      "base_distance_miles": 1000,
+      "advance_purchase_days": 60,
+      "passengers": [
+        { "count": 2, "type": "adult" },
+        { "count": 1, "type": "child" },
+        { "count": 1, "type": "infant" }
+      ],
+      "cabin_class": "economy",
+      "booking_class": "Y",
+      "route_type": "international",
+      "season_code": "low"
+    },
+    "expected": {
+      "base_fare": 376.2,
+      "total_fare": 545.55,
+      "fare_basis_prefix": "EYLI",
+      "tax_count": 8,
+      "refundable": true,
+      "changeable": true,
+      "advance_purchase_min": 0
+    }
+  },
+  {
+    "name": "business_K_peak_intl_2500mi_200ap",
+    "request": {
+      "base_distance_miles": 2500,
+      "advance_purchase_days": 200,
+      "passengers": [{ "count": 1, "type": "adult" }],
+      "cabin_class": "business",
+      "booking_class": "K",
+      "route_type": "international",
+      "season_code": "peak"
+    },
+    "expected": {
+      "base_fare": 479.7,
+      "total_fare": 545.39,
+      "fare_basis_prefix": "BKPI",
+      "tax_count": 3,
+      "refundable": false,
+      "changeable": false,
+      "advance_purchase_min": 7
+    }
+  }
+]
