@@ -2,95 +2,88 @@
 
 A standalone **A2A microservice** that computes deterministic travel fare quotes.
 It is the pricing half of a two-repo agentic system: an LLM orchestrator
-(`travel-agent`) gathers a trip and calls this engine over A2A; the engine prices
-it and returns a structured `FareQuote`.
+(`travel-agent`) collects trip details and calls this engine over A2A; the engine
+returns a structured `FareQuote` — no PII, no airports, just derived numeric values.
 
-The headline idea: **a deterministic core wrapped in an LLM-as-transport adapter.**
-Every dollar of arithmetic lives in pure, audited Go — the model never does math.
+## Why this service is separate
 
-> **📦 Part of a two-repo system.** This is the pricing engine. The orchestrator
-> that calls it lives in a separate repo — to run the whole thing, clone both:
-> - 🧭 **Orchestrator (start here):** [yakyetilabs/travel-agent](https://github.com/yakyetilabs/travel-agent)
-> - ⚙️ **This repo (pricing engine):** [yakyetilabs/travel-fare-engine](https://github.com/yakyetilabs/travel-fare-engine)
->
-> System-level guides (in the orchestrator repo):
-> [Architecture](https://github.com/yakyetilabs/travel-agent/blob/main/docs/ARCHITECTURE.md) ·
-> [Deploy your own](https://github.com/yakyetilabs/travel-agent/blob/main/docs/DEPLOY.md) ·
-> [Lessons learned](https://github.com/yakyetilabs/travel-agent/blob/main/docs/LESSONS.md)
+The fare engine is not a library inside the orchestrator. It is an independent
+service with its own codebase, deployment, and IAM scope. This separation exists
+to enforce a hard boundary that is valuable in a production system:
 
----
+- **Privacy by construction.** The engine never sees traveler names, email
+  addresses, employee IDs, or even raw airport codes. Its request contract
+  contains only distance in miles, passenger counts, advance‑purchase days, and
+  classification codes. Logs from this service can be retained without exposing
+  personally identifiable information.
+- **Auditable pricing surface.** The only artefact of a pricing decision is the
+  output of a pure Go function (`fare.Calculate()`). The function is fully
+  unit‑tested, and the CI pipeline blocks deployment if it regresses.
+- **Independent deployability.** Fare calculations can change without touching
+  the orchestrator’s conversation logic. The two services evolve on their own
+  cadences, bound only by the A2A contract.
+- **A2A protocol demonstration.** The engine’s capabilities are published via
+  `/.well-known/agent-card.json` and consumed by the orchestrator at runtime.
+  No code is shared; the contract is the only shared truth.
+- **Defence in depth.** The engine contains an LLM agent that refuses to call
+  `compute_fare` if a required field is missing. Under normal operation the
+  orchestrator provides a complete request, but this guard catches integration
+  bugs before they produce incorrect fares.
 
-## Why this project exists
+## Design principles
 
-It's a portfolio piece demonstrating a production-shaped pattern for
-**agentic microservices**: how to expose an audit-sensitive, deterministic
-function as a discoverable, composable A2A agent without letting the LLM anywhere
-near the numbers. The pricing problem is intentionally simple so the *architecture*
-can be the point — boundary contracts, deterministic cores, tripwire tests, and
-eval-gated delivery.
+The codebase holds itself to these rules:
 
----
+1. **Deterministic core.** All math lives in `internal/domain/fare/engine.go`.
+   The LLM never calculates fares; it only decides _when_ to call the
+   deterministic tool.
+2. **Pinned boundary contract.** Input (`FareQuoteRequest`) and output
+   (`FareQuote`) are plain structs. Enum vocabularies are duplicated in the
+   orchestrator repository intentionally — the price of independent
+   deployability. Tripwire tests on both sides fail the build if they drift.
+3. **Stateless.** No database, no session affinity, no quote persistence.
+   Quote IDs are audit references for the orchestrator, not keys into engine
+   storage.
+4. **Eval‑gated delivery.** A golden‑case eval suite pins the pricing math.
+   CI runs evals on relevant paths and blocks merge on regression.
 
-## Design philosophy & principles
-
-These are the rules the codebase actually holds itself to (see `DECISIONS.md` for
-the full ADR):
-
-1. **Deterministic core, LLM-as-wrapper.** All pricing math is pure Go in
-   [`internal/domain/fare/engine.go`](internal/domain/fare/engine.go) — no I/O, no
-   network, no LLM. The model only (a) parses natural language into a structured
-   request and (b) transcribes the tool's output to the wire schema. Fares are the
-   most audit-sensitive output in the system, so they are never produced by a
-   prompt.
-2. **The boundary contract is the only shared truth.** Input (`FareQuoteRequest`)
-   and output (`FareQuote`) are plain structs. The two repos share **no code** —
-   they must stay independently deployable.
-3. **Intentional duplication + tripwire tests.** The enum vocabularies (cabin,
-   booking, route, season, passenger) are deliberately duplicated in the
-   orchestrator repo. A tripwire test on each side fails the build if they drift —
-   here, [`internal/domain/fare/schema_test.go`](internal/domain/fare/schema_test.go)
-   checks the engine's `agent-card.json` against the code's exported slices.
-4. **Statelessness.** No persistence, no inventory, no session affinity. Quote IDs
-   are for the orchestrator's audit trail, not a database key.
-5. **Eval-gated delivery.** A golden-case [`eval/`](eval/) suite pins the pricing
-   math; CI blocks deploy if it regresses.
-6. **Narrow boundary.** The engine knows only distances, dates, passenger counts,
-   and booking classes. It never sees airports or traveler PII — deriving those is
-   the orchestrator's job.
+See [`DECISIONS.md`](DECISIONS.md) for the full Architecture Decision Record.
 
 ---
 
-## Architecture
+## Architecture (internal)
 
 ```
-┌──────────────────────┐         A2A (JSON-RPC 2.0, message/send)
-│  Orchestrator repo   │         + GCP ID token (Cloud Run IAM)
-│  (travel-agent, Py)  │ ───────────────────────────────────────┐
-└──────────────────────┘                                         │
-                                                                 ▼
-                              ┌──────────────────────────────────────────────┐
+┌──────────────────────┐        A2A (JSON-RPC 2.0, message/send)
+│  Orchestrator repo   │        + GCP ID token (Cloud Run IAM)
+│(SequentialAgent, Py) │ ───────────────────────────────────────┐
+└──────────────────────┘                                        │
+                                                                ▼
+                              ┌────────────────────────────────────────────────┐
                               │              travel-fare-engine                │
                               │                                                │
-                              │   A2A server (a2a-go)  ──►  ADK SequentialAgent│
-                              │                              ├─ pricing  (LLM + compute_fare tool)
-                              │                              └─ formatter(LLM + output_schema)
+                              │ A2A server (a2a-go)  ──►  ADK SequentialAgent  │
+                              │                            ├─ pricing (LlmAgent) ← validates, normalises, calls      compute_fare
+                              │                            └─ formatter (LlmAgent) ← transcribes tool output to FareQuote schema
                               │                                      │         │
-                              │                          compute_fare│ calls   │
+                              │                          compute_fare│ tools   │
                               │                                      ▼         │
                               │            fare.Calculate()  ── pure Go ───────│
                               │            tables.go (static fare matrices)    │
-                              └──────────────────────────────────────────────┘
+                              └────────────────────────────────────────────────┘
 ```
 
 **Two-step agent pipeline:**
 
-1. **`pricing`** — an `LlmAgent` with the `compute_fare` `FunctionTool`. It
-   validates/normalizes the request and calls the tool. It has **no**
-   `output_schema` (that would disable tool calling).
-2. **`formatter`** — an `LlmAgent` with `output_schema` and **no** tools. It
-   transcribes the tool's `FareQuote` into the schema-validated wire response.
+1. **pricing** carries the instruction to never compute a fare itself and to ask
+   for missing information if a field is absent. When a complete request arrives
+   it calls `compute_fare` and the tool result becomes its entire response.
+2. **formatter** (if present) is a lightweight agent with `output_schema =
+FareQuote` and no tools. It ensures the wire response is exactly the
+   schema‑validated struct, with no stray commentary.
 
-Wiring lives in [`cmd/server/main.go`](cmd/server/main.go).
+The A2A server is wired in [`cmd/server/main.go`](cmd/server/main.go) and serves
+the agent card at `/.well-known/agent-card.json`.
 
 ---
 
@@ -98,17 +91,15 @@ Wiring lives in [`cmd/server/main.go`](cmd/server/main.go).
 
 ### Input — `FareQuoteRequest`
 
-| Field                   | Type               | Constraints                                       |
-| ----------------------- | ------------------ | ------------------------------------------------- |
-| `base_distance_miles`   | int                | 100–10000 (orchestrator derives from airports)    |
-| `advance_purchase_days` | int                | 0–365                                             |
-| `passengers`            | `[]PassengerGroup` | ≥1 group; **total count ≤ 9**                     |
-| `cabin_class`           | string             | `economy` `premium_economy` `business` `first`    |
-| `booking_class`         | string             | `Y B M H Q G K`                                   |
-| `route_type`            | string             | `domestic` `international`                        |
-| `season_code`           | string             | `low` `shoulder` `peak`                           |
-
-`PassengerGroup` = `{ count: 1–9, type: adult|child|infant }`.
+| Field                   | Type               | Constraints                                    |
+| ----------------------- | ------------------ | ---------------------------------------------- |
+| `base_distance_miles`   | int                | 100–10000 (orchestrator derives from airports) |
+| `advance_purchase_days` | int                | 0–365                                          |
+| `passengers`            | `[]PassengerGroup` | total count ≤ 9; types: adult, child, infant   |
+| `cabin_class`           | string             | `economy` `premium_economy` `business` `first` |
+| `booking_class`         | string             | `Y B M H Q G K`                                |
+| `route_type`            | string             | `domestic` `international`                     |
+| `season_code`           | string             | `low` `shoulder` `peak`                        |
 
 ### Output — `FareQuote`
 
@@ -122,51 +113,33 @@ Full struct definitions: [`internal/domain/fare/schema.go`](internal/domain/fare
 
 ## Pricing model
 
-All numbers come from static tables in
-[`internal/domain/fare/tables.go`](internal/domain/fare/tables.go) (stand-ins for
-real ATPCO data):
+All figures are derived from static tables in
+[`internal/domain/fare/tables.go`](internal/domain/fare/tables.go) — stand‑ins for
+live ATPCO or negotiated fares:
 
-- **Base fare** = `distance × per_mile_rate`, where the rate is a product of
-  cabin/route, booking-class, and season multipliers (168 precomputed combinations).
-- **Advance-purchase discount** — a tiered curve keyed by days booked ahead.
+- **Base fare** = distance × per‑mile rate, where the rate is a product of cabin,
+  route, booking class, and season multipliers.
+- **Advance‑purchase discount** — tiered curve based on days booked ahead.
 - **Passenger factors** — adult ×1.00, child ×0.75, infant ×0.10.
-- **Taxes** — keyed by `route_type` × passenger type (domestic US taxes;
-  international departure/arrival fees), supporting both proportional and flat fees.
-- **`fare_basis_code`** — synthesized deterministically from the inputs
-  (e.g. `EYLD04`).
-- **`expires_at`** — `now + QuoteValidityWindow` (a short, fixed 24h fare hold —
-  deliberately independent of `advance_purchase_days`, which only affects price).
+- **Taxes** — keyed by route type and passenger type.
+- **Fare basis code** — synthesised deterministically from inputs.
+- **Expiry** — fixed 24‑hour validity window, independent of advance‑purchase days.
 
-### What the engine validates (and what it doesn't)
+### Validation
 
-**Rejects:** empty passengers; total passengers > 9; unknown enum values; a
-booking class booked inside its advance-purchase minimum (G≥21, Q≥14, K≥7 — a
-single source of truth that also feeds the advertised `fare_rules`); out-of-range
-distance or advance-purchase days.
+The engine rejects requests with empty passengers, total count > 9, unknown enum
+values, or a booking class booked inside its advance‑purchase minimum. It does
+**not** enforce business policy (e.g., who may fly business class) — that belongs
+to the orchestrator.
 
-**Does not reject:** odd-but-valid passenger mixes (e.g. infant-only). Business
-policy belongs to the orchestrator; the engine is pure math.
+## Security
 
----
-
-## Project structure
-
-```
-travel-fare-engine/
-├── agent-card.json          # static A2A card, served at /.well-known/agent-card.json
-├── cmd/server/
-│   ├── main.go              # A2A server + SequentialAgent wiring + card rendering
-│   └── prompts.go           # pricing & formatter agent instructions
-├── internal/domain/fare/
-│   ├── schema.go            # FareQuoteRequest / FareQuote structs + vocabularies
-│   ├── engine.go            # pure Calculate() + validation
-│   ├── tables.go            # static fare/tax matrices, AP curve, AP minimums
-│   ├── engine_test.go       # table-driven unit tests
-│   └── schema_test.go       # agent-card tripwire test
-├── eval/                    # golden-case eval harness (cases.json + eval_test.go)
-├── DECISIONS.md             # architecture decision record
-└── LOCAL_TESTING.md         # step-by-step local test guide
-```
+- Deployed to **Cloud Run** with `--no-allow-unauthenticated`.
+- Requires a valid Google identity token on every call.
+- Service account `travel-fare-engine-sa` scoped to `roles/aiplatform.user` only
+  (for Vertex AI access). No database, no GCS, no secret access.
+- CI/CD authenticates via **Workload Identity Federation** — no service account
+  keys exist.
 
 ---
 
@@ -182,12 +155,11 @@ travel-fare-engine/
 
 ```bash
 export GEMINI_API_KEY="your-key"
-export PORT=8081            # optional, defaults to 8081
-# export HOST_URL=...       # optional; the URL advertised in the agent card
+export PORT=8081            # optional, default 8081
 go run ./cmd/server
 ```
 
-Then send a fare request (A2A `message/send`):
+Test with a raw A2A request:
 
 ```bash
 curl -sS -X POST http://localhost:8081/ \
@@ -220,8 +192,7 @@ curl -sS http://localhost:8081/.well-known/agent-card.json | jq .
 > deploying to Cloud Run, set `HOST_URL` to the service URL — Cloud Run does not
 > inject it automatically, and an unset value would advertise `localhost`.
 
-See [`LOCAL_TESTING.md`](LOCAL_TESTING.md) for the full walkthrough (`.env`
-loading, edge cases, graceful shutdown).
+See [`LOCAL_TESTING.md`](LOCAL_TESTING.md) for step‑by‑step instructions.
 
 ---
 
@@ -234,18 +205,12 @@ go test ./internal/domain/fare/ -run TestTripwire   # contract tripwire only
 go test ./eval/                                 # golden-case eval harness
 ```
 
-The engine's math is fully covered without a model in the loop: table-driven unit
-tests, the agent-card tripwire, and the eval harness. The orchestrator repo owns
-the end-to-end, model-in-the-loop ADK evals. See [`eval/README.md`](eval/README.md).
+The engine’s math is covered without a live model. End‑to‑end, model‑in‑the‑loop
+evaluations live in the orchestrator’s repository.
 
 ---
 
 ## Deployment
-
-Deployed to **Cloud Run** with `--no-allow-unauthenticated` — every call requires
-a valid GCP identity token. The orchestrator's service account is granted
-`roles/run.invoker` and attaches an ID token to each A2A call. CI authenticates via
-**Workload Identity Federation** (no service-account keys).
 
 ```bash
 # Emergency only — CI is the primary deploy path
@@ -253,27 +218,28 @@ gcloud run deploy travel-fare-engine --source . --region us-central1 \
   --no-allow-unauthenticated --set-env-vars HOST_URL=https://<service-url>/
 ```
 
-IAM, ingress, and rollback details are in `DECISIONS.md` §11–12.
+CI is the primary deploy path. The orchestrator’s service account must be granted
+roles/run.invoker on this service.
 
 ---
 
-## Known simplifications
+## Known gaps
 
-Honest about what a real system would add (full list in `DECISIONS.md` §10):
+Honest about what a production system would add:
 
-- Static fare tables instead of real-time pricing / ATPCO data.
-- No quote persistence; IDs are audit references only.
-- Approximate taxes (no airport-specific fees or stopover logic).
+- **Static fare tables** instead of real-time pricing / ATPCO data.
+- **No persistence.** Quotes are not stored; the quote ID is an audit reference only.
+- **Approximate taxes.** No airport‑specific or stopover fees.
 - `float64` rounded to cents — production would use integer cents or a decimal
   library to eliminate floating-point drift.
+- **No automated rollback.** Cloud Run’s revision model keeps the previous
+  version serving, but the pipeline does not automatically revert on smoke‑test failure.
 - No fair-lending / compliance review of fare adjustments.
-- The `eval/` harness exists; the orchestrator-side end-to-end evalsets and the
-  eval-gated CI wiring are the next step.
 
 ---
 
 ## Related
 
-- **Orchestrator:** `travel-agent` — the Python ADK multi-agent system that calls
+- **Orchestrator:** `travel-agent` — the Python multi-agent system that calls
   this engine over A2A.
 - **Architecture decisions:** [`DECISIONS.md`](DECISIONS.md)
